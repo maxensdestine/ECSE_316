@@ -9,6 +9,32 @@ from random import randint
 from socket import *
 
 
+def dns_server_format_validator(dns :str):
+    if len(dns) < 2:
+        msg = "Error    Incorrect input syntax: Please use @a.b.c.d, e.g. for google public dns server use @8.8.8.8"
+        raise argparse.ArgumentTypeError(msg) 
+
+    labels = dns[1:].split('.')
+    
+    if len(labels) != 4 or dns[0] != '@':
+        msg = "Error    Incorrect input syntax: Please use @a.b.c.d, e.g. for google public dns server use @8.8.8.8"
+        raise argparse.ArgumentTypeError(msg) 
+    
+    for label in labels:
+        try:
+            my_int = int(label)
+            if my_int < 0:
+                msg = "Error    Incorrect input syntax: An IPv4 address cannot have negative numbers."
+                raise argparse.ArgumentTypeError(msg) 
+        except:
+            msg = "Error    Incorrect input syntax: An IPv4 address must be numbers separated by dots with an '@', e.g. @8.8.8.8 "
+            raise argparse.ArgumentTypeError(msg)
+    return dns
+
+
+"""
+ Creates the parser that handles command line arguments 
+"""
 def parse_arguments():
 
     # Instantiate the parser
@@ -36,7 +62,7 @@ def parse_arguments():
         and if neither is given then the client should send a type A \
             (IP address) query")
 
-    parser.add_argument("server", help="Server: the IPv4 address of the DNS server, \
+    parser.add_argument("server",  type=dns_server_format_validator, help="Server: the IPv4 address of the DNS server, \
         in a.b.c.d. format")
 
     parser.add_argument("name", help="Name: The domain name to query for")
@@ -51,11 +77,12 @@ def parse_arguments():
     global destPortVal
 
 
-    timeoutAfter = args.timeout
-    nbRetries = args.maxrepeat
-    destPortVal = args.port
+    timeoutAfter = int(args.timeout or 5)
+    nbRetries = int(args.maxrepeat or 3)
+    destPortVal = int(args.port or 53)
     destDomainName = args.name
-    destDNSServerIP = args.server
+    print(args.server)
+    destDNSServerIP = str(args.server or '@1.1.1.1')[1:]
 
     if args.ns:
         reqType = "NS"
@@ -65,12 +92,15 @@ def parse_arguments():
         reqType="A"
 
 
+"""
+Encodes the given str in a format adequate for DNS requests 'QNAME' block
+:param name: The string to be encoded in a byte format
+"""
 def get_qname(name: str):
     response = []
     for label in name.split('.'):
         if len(label) > 63:
-            raise RuntimeError("The domain name contains a label"\
-                "\n(" + label + ")\nthat is larger than 63 characters")
+            raise RuntimeError("Error   Unexpected input. The domain name contains a label \n(" + label + ") that is larger than 63 characters")
         
         size = format(len(label), '08b')
         response.append(size)
@@ -79,7 +109,9 @@ def get_qname(name: str):
     response.append(format(0x0000, '08b'))
     return ''.join(response)
 
-
+"""
+ builds the question block of the dns request based on the cli arguments
+"""
 def build_question():
     global sizeOfQuestion
     queryTypeA = format(0x0001, '016b')
@@ -105,6 +137,7 @@ def build_question():
     return myBytes
 
 
+"""Builds the header of the dns request based on the cli inputs"""
 def build_header():
     randomId = randint(1, 32767)
     transactionId = format(randomId, '016b')
@@ -131,11 +164,12 @@ def build_header():
     myBytes += int(arCount, 2).to_bytes(2, byteorder='big')
     return myBytes
 
-
+"""Builds the dns query (combines the header and the question)"""
 def build_query():
     query = build_header() + build_question()
     return query
-    
+
+"""Interprets the dns response"""  
 def interpret_response():
     id = sent_query[:2]
     receivedId = received_response[:2]
@@ -171,12 +205,9 @@ def interpret_response():
     if sent_query[12:12 + sizeOfQuestion] != received_response[12:12 + sizeOfQuestion]:
         print('Error    Unexpected response. The query sent is not the same as the query received. The program will proceed but packet the may have been corrupted.')
 
-    # if there are no records in either section, simply print notfound
-    if anCount == 0 and arCount == 0:
-        print('NOTFOUND')
-    else:
-        print_all_records(auth, anCount, nsCount, arCount)
+    print_all_records(auth, anCount, nsCount, arCount)
 
+"""Finds the name given an offset from the dns response. This function handles name compression by recursion."""
 def get_name(offset: int):
     words = []
     toFind = 0
@@ -220,8 +251,14 @@ def get_name(offset: int):
     return (len(words) + nbLetters + additional, '.'.join(words))
 
 
-
+"""Prints all the records of the dns response or an error message if none of the message have an expected type"""
 def print_all_records(auth: bool, nbAnsRecords: int, nbAuthRecords: int, nbAddRecords: int):
+
+    # if there are no records in either section, simply print notfound
+    if nbAnsRecords == 0 and nbAddRecords == 0:
+        print('NOTFOUND')
+        return
+
     domainName = ''
     size = len(received_response)
     i = 12 + sizeOfQuestion
@@ -263,13 +300,15 @@ def print_all_records(auth: bool, nbAnsRecords: int, nbAuthRecords: int, nbAddRe
     if firstAns and firstAdd:
         print('NOTFOUND')
 
-
+"""Indicates whether a type is A, NS, MX, CNAME (True) or something else (False)"""
 def is_known_type(the_type :int):
     if the_type == 1 or the_type == 2 or the_type == 5 or the_type == 15:
         return True
     else:
         return False
 
+
+"""Prints the record depending on its type. An error message is displayed for unknown types"""
 def print_record(domainName: str, my_type: int, my_class: int, my_ttl: int, my_rdLength: int, index: int, auth: bool):
     output = ''
     authority = 'auth' if auth else 'nonauth'
@@ -282,12 +321,12 @@ def print_record(domainName: str, my_type: int, my_class: int, my_ttl: int, my_r
     elif my_type == 15:
         output = get_output_type_mx_record(index)
     else:
-        print('NOTFOUND    (Record present but its type does not correspond to A, NS, MX or CNAME)')
+        print('NOTFOUND    (A record is present but its type does not correspond to A, NS, MX or CNAME)')
     
     if output != '':
         print(output + '    ' + str(my_ttl) + '    ' + authority)
 
-
+"""Extracts the ip address from an A type record"""
 def extract_ip_add(offset: int):
     if len(received_response) < offset + 4:
         print("Error    Unexpected response. The response indicates a type A response, but the ip address format is invalid (less than 4 octets).")
@@ -314,7 +353,7 @@ def get_output_type_mx_record(index: int):
 def get_output_type_cname_record(index: int):
     return 'CNAME   ' + get_name(index)[1]
 
-
+"""Sends a dns request given the CLI arguments and retrieves the response"""
 def send_request():
     global sent_query
     global received_response
@@ -362,8 +401,9 @@ def send_request():
     print('Response received after ' + sci_notation(end - start, 2)  + ' seconds ('+ str(my_nb_retries) +' retries)')
     interpret_response()
 
-# @author 'Will' stackoverflow user
-# obtained from https://stackoverflow.com/questions/29260893/convert-to-scientific-notation-in-python-a-%C3%97-10b
+""" This method print number in a scientific notation with x10 instead of 'e'
+@author 'Will' stackoverflow user
+ obtained from https://stackoverflow.com/questions/29260893/convert-to-scientific-notation-in-python-a-%C3%97-10b"""
 def sci_notation(number, sig_fig=2):
     ret_string = "{0:.{1:d}e}".format(number, sig_fig)
     a, b = ret_string.split("e")
