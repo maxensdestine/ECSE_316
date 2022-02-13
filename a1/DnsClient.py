@@ -160,20 +160,22 @@ def interpret_response():
             " QDCOUNT indicates more than one question (expected 1).")
 
     anCount = int.from_bytes(received_response[6:8], byteorder='big', signed=False)
-    if anCount != 0:
-        print("***Answer Section (" + str(anCount) + " record(s))***")
+
+    nsCount = int.from_bytes(received_response[8:10], byteorder='big', signed=False)
 
     arCount = int.from_bytes(received_response[10:12], byteorder='big', signed=False)
-    if arCount != 0:
-        print("***Additional Section (" + arCount + " record(s))***")
     
+
+    # validate that the response contains the query as sent
+
     if sent_query[12:12 + sizeOfQuestion] != received_response[12:12 + sizeOfQuestion]:
         print('Error    Unexpected response. The query sent is not the same as the query received. The program will proceed but packet the may have been corrupted.')
 
+    # if there are no records in either section, simply print notfound
     if anCount == 0 and arCount == 0:
         print('NOTFOUND')
     else:
-        print_ans_records(auth)
+        print_all_records(auth, anCount, nsCount, arCount)
 
 def get_name(offset: int):
     words = []
@@ -182,89 +184,91 @@ def get_name(offset: int):
     nbLetters = 0
     i = offset
     size = len(received_response)
-
+    additional = 0
+    
     while i < size :
+        
         myByte = received_response[i]
         if myByte == 0:
             break
         if toFind == 0:
+            # check to prevent out of bounds access
             if i + 1 < size:
                 line = int.from_bytes(received_response[i: i + 2], byteorder='big', signed=False)
                 lineBin = format(line, '016b')
                 if lineBin[:2] == '11':
+                    words += ['']
+                    curWordIndex += 1
+                    words[curWordIndex] += get_name(int(lineBin[2:], 2))[1]
+                    # compressed parts are 2 bytes long no matter their content.
+                    # the length of 'words' list accounts for 1 byte already.
+                    additional = 1
                     break
-            #print("making new word")
+
+            # if no compression scheme is detected, we prepare to take the next word
             toFind = myByte
             words += ['']
             curWordIndex += 1
         else:
-            #print("adding letter")
+            # add the letter to the current word
             words[curWordIndex] += chr(myByte)
             toFind -= 1
-            nbLetters += 1 
+            nbLetters += 1
 
         i += 1
-
-    #print("get name output" + '.'.join(words) + " length of " + str(len(words) + nbLetters))
-    return (len(words) + nbLetters, '.'.join(words))
-
-
-def extract_name(fromIndex: int):
-    nameLength = 0
-    name = ''
-    nameByteList = received_response[fromIndex:]
-    size = len(nameByteList)
-    i = 0
-    while i < size:
-        myByte = nameByteList[i]
-        if myByte == 0:
-            break
-        
-        if i + 1 < size:
-            line = int.from_bytes(nameByteList[i: i + 2], byteorder='big', signed=False)
-            lineBin = format(line, '016b')
-            if lineBin[:2] == '11':
-                name += get_name(int(lineBin[2:], 2))[1]
-                name += '.'
-                nameLength += 2
-                break
-            else:
-                my_tuple = get_name(fromIndex + i)
-                name += my_tuple[1]
-                name += '.'
-                i += my_tuple[0]
-                nameLength += my_tuple[0]
-        else:
-            my_tuple = get_name(fromIndex + i)
-            name += my_tuple[1]
-            name += '.'
-            i += my_tuple[0]
-            nameLength += my_tuple[0]
-
-    if name[len(name) - 1] == '.':
-        name = name[:len(name) - 1]
-
-    return (nameLength, name)
+    # output the length (in bytes) of the name and the name.
+    return (len(words) + nbLetters + additional, '.'.join(words))
 
 
 
-def print_ans_records(auth: bool):
+def print_all_records(auth: bool, nbAnsRecords: int, nbAuthRecords: int, nbAddRecords: int):
     domainName = ''
     size = len(received_response)
     i = 12 + sizeOfQuestion
+    nbRecordsFound = 0
+    firstAns = True
+    firstAdd = True
     while i < size:
-        nameLength, domainName = extract_name(i)
+        nbRecordsFound += 1
+        nameLength, domainName = get_name(i)
         index = i + nameLength
         my_type = received_response[index: index + 2]
+        type_num = int.from_bytes(my_type, byteorder='big', signed=False)
         my_class = received_response[index + 2: index + 4]
+        class_num = int.from_bytes(my_class, byteorder='big', signed=False)
         my_ttl = received_response[index + 4: index + 8]
+        ttl_num = int.from_bytes(my_ttl, byteorder='big', signed=False)
         my_rdLength = received_response[index + 8: index + 10]
-        cv_my_rdLength = int.from_bytes(my_rdLength, byteorder='big', signed=False)
+        rdLength_num = int.from_bytes(my_rdLength, byteorder='big', signed=False)
 
-        print_record(domainName, int.from_bytes(my_type, byteorder='big', signed=False), int.from_bytes(my_class, byteorder='big', signed=False), int.from_bytes(my_ttl, byteorder='big', signed=False), cv_my_rdLength, index + 10, auth)
+        if nbRecordsFound > nbAnsRecords and nbRecordsFound <= nbAnsRecords + nbAuthRecords:
+            # we do not print authoritative records
+            pass
+        else:
+            if nbRecordsFound <= nbAnsRecords and firstAns and is_known_type(type_num):
+                print("***Answer Section (" + str(nbAnsRecords) + " record(s))***")
+                firstAns = False
+            elif nbRecordsFound > nbAnsRecords + nbAuthRecords and firstAdd and is_known_type(type_num):
+                print("***Additional Section (" + str(nbAddRecords) + " record(s))***")
+                firstAdd = False
 
-        i += nameLength + 10 + cv_my_rdLength
 
+            print_record(domainName, type_num, class_num, ttl_num, rdLength_num, index + 10, auth)
+        
+
+        i += nameLength + 10 + rdLength_num
+
+    # If nothing was printed, we print the notfound error.
+    # It means that all records had an unknown type.
+    if firstAns and firstAdd:
+        print('NOTFOUND')
+
+
+def is_known_type(the_type :int):
+    if the_type == 1 or the_type == 2 or the_type == 5 or the_type == 15:
+        return True
+    else:
+        return False
 
 def print_record(domainName: str, my_type: int, my_class: int, my_ttl: int, my_rdLength: int, index: int, auth: bool):
     output = ''
@@ -277,6 +281,8 @@ def print_record(domainName: str, my_type: int, my_class: int, my_ttl: int, my_r
         output = get_output_type_cname_record(index)
     elif my_type == 15:
         output = get_output_type_mx_record(index)
+    else:
+        print('NOTFOUND    (Record present but its type does not correspond to A, NS, MX or CNAME)')
     
     if output != '':
         print(output + '    ' + str(my_ttl) + '    ' + authority)
@@ -297,16 +303,16 @@ def get_output_type_a_record(index: int):
     return 'IP   ' + ipAdd
 
 def get_output_type_ns_record(index: int):
-    return 'NS    ' + extract_name(index)[1]
+    return 'NS    ' + get_name(index)[1]
 
 def get_output_type_mx_record(index: int):
     pref = received_response[index: index + 2]
     prefValue = int.from_bytes(pref, byteorder='big', signed=False)
-    domainName = extract_name(index + 2)[1]
+    domainName = get_name(index + 2)[1]
     return 'MX    ' + domainName + '    ' + str(prefValue) 
 
 def get_output_type_cname_record(index: int):
-    return 'CNAME   ' + extract_name(index)[1]
+    return 'CNAME   ' + get_name(index)[1]
 
 
 def send_request():
