@@ -81,7 +81,6 @@ def parse_arguments():
     nbRetries = int(args.maxrepeat or 3)
     destPortVal = int(args.port or 53)
     destDomainName = args.name
-    print(args.server)
     destDNSServerIP = str(args.server or '@1.1.1.1')[1:]
 
     if args.ns:
@@ -189,9 +188,9 @@ def interpret_response():
 
     qdCount = int.from_bytes(received_response[4:6], byteorder='big', signed=False)
 
-    if qdCount > 1:
+    if qdCount != 1:
         print("Error    Unexpected response. The response's"\
-            " QDCOUNT indicates more than one question (expected 1).")
+            " QDCOUNT indicates "+ str(qdCount)+" question(s) (expected 1).")
 
     anCount = int.from_bytes(received_response[6:8], byteorder='big', signed=False)
 
@@ -313,7 +312,7 @@ def print_record(domainName: str, my_type: int, my_class: int, my_ttl: int, my_r
     output = ''
     authority = 'auth' if auth else 'nonauth'
     if my_type == 1:
-        output = get_output_type_a_record(index)
+        output = get_output_type_a_record(index, my_rdLength)
     elif my_type == 2:
         output = get_output_type_ns_record(index)
     elif my_type == 5:
@@ -337,9 +336,13 @@ def extract_ip_add(offset: int):
         return '.'.join(output)
 
 
-def get_output_type_a_record(index: int):
-    ipAdd = extract_ip_add(index)
-    return 'IP   ' + ipAdd
+def get_output_type_a_record(index: int, rdLength: int):
+    if rdLength == 4:
+        ipAdd = extract_ip_add(index)
+        return 'IP    ' + ipAdd
+    else:
+        print('Error    Unexpected response. The record is of type A, but its RDLENGTH is not equal to 4.')
+        return 'IP    ' + 'Unknown'
 
 def get_output_type_ns_record(index: int):
     return 'NS    ' + get_name(index)[1]
