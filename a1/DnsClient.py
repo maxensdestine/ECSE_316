@@ -32,6 +32,55 @@ def dns_server_format_validator(dns :str):
     return dns
 
 
+def timeout_format_validator(timeout: str):
+    msg = "Error    Incorrect input syntax: The timeout must be an integer in the range [0, inf[."
+    try:
+        someVal = int(timeout)
+        if someVal < 0:
+            msg = "Error    Incorrect input syntax: The timeout must bigger or equal to 0."
+        else:
+            return timeout
+        raise argparse.ArgumentTypeError(msg)
+    except:
+        raise argparse.ArgumentTypeError(msg)
+
+
+def maxretries_format_validator(maxretries: str):
+    msg = "Error    Incorrect input syntax: The maxretries must be an integer in the range [0, inf[."
+    try:
+        someVal = int(maxretries)
+        if someVal < 0:
+            msg = "Error    Incorrect input syntax: The maxretries must bigger or equal to 0."
+        else:
+            return maxretries
+        raise argparse.ArgumentTypeError(msg)
+    except:
+        raise argparse.ArgumentTypeError(msg)
+
+
+def port_format_validator(port: str):
+    msg = "Error    Incorrect input syntax: The port must be an integer in the range [0, 65535]."
+    try:
+        someVal = int(port)
+        if someVal < 0 or someVal > 65535:
+            msg = "Error    Incorrect input syntax: The port must bigger or equal to 1 and smaller or equal to 65535."
+        else:
+            return port
+        raise argparse.ArgumentTypeError(msg)
+    except:
+        raise argparse.ArgumentTypeError(msg)
+
+
+def domain_format_validator(domain: str):
+    if len(domain.split('.')) < 2:
+        msg = "Error    Incorrect input syntax. Please input a domain name with at least 2 non empty levels. E.g. google.com ."
+        raise argparse.ArgumentTypeError(msg)
+    elif domain.split('.')[0] == '' or domain.split('.')[1] == '':
+        # emphasis on the NON EMPTY as it is the error here
+        msg = "Error    Incorrect input syntax. Please input a domain name with at least 2 NON EMPTY levels. E.g. google.com ."
+        raise argparse.ArgumentTypeError(msg)
+    return domain
+
 """
  Creates the parser that handles command line arguments 
 """
@@ -41,13 +90,13 @@ def parse_arguments():
 
     parser = argparse.ArgumentParser(description="Optional app description")
 
-    parser.add_argument("-t", "--timeout", type=int, default=5, help="Timeout: How long to wait, in seconds, \
+    parser.add_argument("-t", "--timeout", type=timeout_format_validator, default=5, help="Timeout: How long to wait, in seconds, \
         before retransmitting an unanswered query. Default value: 5")
 
-    parser.add_argument("-r", "--maxrepeat", type=int, default=3, help="Max retries: The maximum number of \
+    parser.add_argument("-r", "--maxrepeat", type=maxretries_format_validator, default=3, help="Max retries: The maximum number of \
         times to retransmit an unanswered query before giving up. Default value: 3")
 
-    parser.add_argument("-p", "--port", type=int, default=53, help="Port: The UDP port number of the DNS \
+    parser.add_argument("-p", "--port", type=port_format_validator, default=53, help="Port: The UDP port number of the DNS \
         server. Default value: 53")
 
     group = parser.add_mutually_exclusive_group()
@@ -65,7 +114,7 @@ def parse_arguments():
     parser.add_argument("server",  type=dns_server_format_validator, help="Server: the IPv4 address of the DNS server, \
         in a.b.c.d. format")
 
-    parser.add_argument("name", help="Name: The domain name to query for")
+    parser.add_argument("name", type=domain_format_validator, help="Name: The domain name to query for")
 
     args = parser.parse_args()
 
@@ -76,11 +125,16 @@ def parse_arguments():
     global nbRetries
     global destPortVal
 
-
+    # redundant because we already ensured the int type with argparse.
+    # I am leaving it like it is because it doesn't hurt to put it here
     timeoutAfter = int(args.timeout or 5)
     nbRetries = int(args.maxrepeat or 3)
     destPortVal = int(args.port or 53)
-    destDomainName = args.name
+
+    # will never be 'someName', this is just to force the type to str
+    destDomainName = str(args.name or 'someName')
+
+    # will never be 1.1.1.1, this is just to force the type to str
     destDNSServerIP = str(args.server or '@1.1.1.1')[1:]
 
     if args.ns:
@@ -361,35 +415,33 @@ def send_request():
     global sent_query
     global received_response
     clientSocket = socket(AF_INET, SOCK_DGRAM)
-    #clientSocket.bind(destDNSServerIP)
     listOfBytes = build_query()
-    #print(listOfBytes)
     sent_query = listOfBytes
-    #print(len(listOfBytes))
     byteArrayObj = bytearray(listOfBytes)
     print("DNS Client sending request for ")
     print(destDomainName + " Server: " + destDNSServerIP)
     print("Request type: " + reqType)
     start = time.time()
-    #destDNSServerIP
     clientSocket.sendto(byteArrayObj, (destDNSServerIP, destPortVal))
     counter = start
+    curWaitStart = start
+    end = start
     my_nb_retries = 0
-
     while 1:
-        end = time.time()
+        counter = time.time()
         try:
             response, serverAddress = clientSocket.recvfrom(2048)
+            end = time.time()
             break
         except:
             pass
         
-        diff = end - counter
+        diff = counter - curWaitStart
 
         if int(diff // 60) > 0 or int(diff % 60) > timeoutAfter:
             if my_nb_retries < nbRetries:
                 clientSocket.sendto(byteArrayObj, (destDNSServerIP, destPortVal))
-                counter = time.time()
+                curWaitStart = time.time()
                 my_nb_retries += 1
             else:
                 my_nb_retries = -1
