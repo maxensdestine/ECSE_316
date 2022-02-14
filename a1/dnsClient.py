@@ -1,6 +1,8 @@
 """
 Created on Sat Feb 05 14:51:17 2022
  @author: Maxens Destine
+ ECSE 316 assignment 1
+ Winter Semester 2022 McGill University
 """
 import argparse
 import time
