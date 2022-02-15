@@ -156,12 +156,14 @@ def get_qname(name: str):
     nbChar = -1
     for label in name.split('.'):
         if len(label) > 63:
-            raise RuntimeError("Error   Unexpected input. The domain name contains a label \n(" + label + ") that is larger than 63 characters")
+            print("Error   Unexpected input. The domain name contains a label \n(" + label + ") that is larger than 63 characters.")
+            sys.exit(1)
         else:
             nbChar += len(label) + 1
         
         if nbChar > 253:
-            raise RuntimeError("Error   Unexpected input. The domain name " + name + " has more than 253 characters. Please use a smaller domain name")
+            print("Error   Unexpected input. The domain name " + name + " has more than 253 characters. Please use a smaller domain name.")
+            sys.exit(1)
 
         size = format(len(label), '08b')
         response.append(size)
