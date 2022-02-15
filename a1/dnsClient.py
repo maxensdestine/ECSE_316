@@ -153,10 +153,16 @@ Encodes the given str in a format adequate for DNS requests 'QNAME' block
 """
 def get_qname(name: str):
     response = []
+    nbChar = -1
     for label in name.split('.'):
         if len(label) > 63:
             raise RuntimeError("Error   Unexpected input. The domain name contains a label \n(" + label + ") that is larger than 63 characters")
+        else:
+            nbChar += len(label) + 1
         
+        if nbChar > 253:
+            raise RuntimeError("Error   Unexpected input. The domain name " + name + " has more than 253 characters. Please use a smaller domain name")
+
         size = format(len(label), '08b')
         response.append(size)
         my_res = ''.join(format(ord(i), '08b') for i in label)
@@ -246,7 +252,7 @@ def interpret_response():
 
     if qdCount != 1:
         print("Error    Unexpected response. The response's"\
-            " QDCOUNT indicates "+ str(qdCount)+" question(s) (expected 1).")
+            " QDCOUNT indicates "+ str(qdCount)+" question(s) (expected 1). The program will still proceed.")
 
     anCount = int.from_bytes(received_response[6:8], byteorder='big', signed=False)
 
