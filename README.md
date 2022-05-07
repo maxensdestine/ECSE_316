@@ -5,7 +5,7 @@ This project is a small dns client which was made during the 2022 Winter semeter
 Ada Andrei and Maxens Destiné
 
 ## Usage
-
+Example: ```python3 dnsClient.py -t 10 -r 2 -mx @8.8.8.8 google.ca```
 CLI Argument | Short |Description |
 --- | --- | --- | 
 --timeout | -t | Timeout: How long to wait, in seconds, before retransmitting an unanswered query. Default value: 5 |
