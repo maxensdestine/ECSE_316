@@ -1,5 +1,8 @@
 # ECSE_316
-Small dns client which can ping servers to get the ns records, mx, records etc. 
+This project is a small dns client which was made during the 2022 Winter semeter for the course ECSE 316. This CLI app can ping servers to get the ns records, mx, records etc. 
+
+### Authors
+Ada Andrei and Maxens Destiné
 
 ## Usage
 
